@@ -1,73 +1,85 @@
 # Mini Data Ingestion Pipeline on GCP
 
-## Purpose
-This project demonstrates a full end-to-end data pipeline using GCP services:
-1. **Data Acquisition & Ingestion** from FTP/SFTP, REST, SOAP, GraphQL, gRPC, Pub/Sub.
-2. **Validation (Quality Gate)** via Apache Beam/Dataflow or Dataproc snapshots, Dataflow pipelines, and custom rules.
-3. **Transformation & Enrichment** in Apache Beam (Dataflow) or Dataproc PySpark.
-4. **Curated/"Gold" Zone** stored as partitioned Parquet in Cloud Storage, queried through BigQuery.
-5. **Metadata Management & Catalog** using Data Catalog, automated crawlers, and IAM.
-6. **Monitoring & Alerting** via Cloud Monitoring, Pub/Sub notifications, and custom drift detection.
+## 🎯 Purpose
 
-## Architecture Overview
-- **Cloud Functions** orchestrate ingestion and routing.
-- **Dataflow** (Apache Beam) or **Dataproc** handle validation and transformation.
-- **Cloud Storage** buckets organized in prefixes: `raw/`, `staging/`, `quarantine/`, `enriched/`, `curated/`.
-- **BigQuery** tables are created over curated datasets.
+An end-to-end data pipeline on GCP:
+
+1. **Ingestion** from FTP/SFTP, REST, SOAP, GraphQL, gRPC, and Pub/Sub, with retry-with-backoff on every call.
+2. **Validation (quality gate)** via Apache Beam: classifies each record as valid or invalid based on required fields + an email-format check, writes invalid records to a quarantine GCS path, and publishes them to Pub/Sub.
+3. **Transformation & enrichment** via Apache Beam: type casts, derives year/month from the timestamp, and joins a BigQuery lookup table.
+4. **Curated zone**: enriched records loaded into BigQuery.
+5. **Metadata management** via Data Catalog entries and IAM policy bindings.
+6. **Monitoring & alerting** via Cloud Monitoring uptime checks and Pub/Sub alerts.
+
+## ⚙️ Architecture Overview
+
+- **Cloud Functions** (`handler.py`, `pubsub_ingest.py`) orchestrate ingestion and routing.
+- **Dataflow** (Apache Beam) runs validation and transformation.
+- **Cloud Storage** is organized by prefix: `raw/`, `staging/`, `quarantine/`, `enriched/`.
+- **BigQuery** tables sit over the curated data.
 - **Data Catalog** registers metadata; **Cloud IAM** secures access.
-- **Pub/Sub** topics for real-time streaming and alerts.
+- **Pub/Sub** carries real-time ingestion and failure-alert topics.
 
-## Project Structure
+## 📁 Project Structure
+
 ```
-mini_data_pipeline_gcp/
-|-- README.md
-|-- requirements.txt
-|-- ftp_ingest.py
-|-- api_ingest.py
-|-- pubsub_ingest.py
-|-- validation.py
-|-- transformation.py
-|-- handler.py
-|-- curated_zone.py
-|-- metadata_catalog.py
-|-- monitoring.py
-|-- .gitignore
+mini_data_pipeline_gcp_project/
+├── ftp_ingest.py          # FTP/SFTP -> GCS, with retries
+├── api_ingest.py          # REST/SOAP/GraphQL/gRPC -> GCS, with retries
+├── pubsub_ingest.py       # Pub/Sub message -> raw GCS zone
+├── validation.py          # Beam: classify valid/invalid, quarantine + Pub/Sub on invalid
+├── transformation.py      # Beam: type casts, year/month derivation, BigQuery lookup enrichment
+├── handler.py             # Cloud Function orchestrator: triggers the validation/transformation Dataflow jobs
+├── curated_zone.py        # Load enriched Parquet into BigQuery
+├── metadata_catalog.py    # Data Catalog entries, IAM policy bindings
+├── monitoring.py          # Cloud Monitoring uptime checks, Pub/Sub alerts
+├── tests/                 # pytest suite
+└── requirements.txt
 ```
 
-## Usage
-1. Configure GCP credentials & environment variables:
+## 🚀 Usage
+
+1. Configure GCP credentials and environment variables:
    - `RAW_BUCKET`, `STAGING_PREFIX`, `QUARANTINE_PREFIX`, `ENRICHED_PREFIX`, `CURATED_PREFIX`
-   - API endpoints & credentials: `REST_URL`, `SOAP_WSDL`, etc.
-   - `LOOKUP_JDBC_CONN`, `LOOKUP_TABLE`
-   - `PROJECT_ID`, `DATASET`, `PUBSUB_TOPIC`, `DATAFLOW_REGION`
+   - `GCP_PROJECT`, `TEMP_LOCATION`, `DATAFLOW_REGION`, `DATAFLOW_SCHEMA` (JSON list of required fields, e.g. `["id","email"]`), `PUBSUB_FAILURE_TOPIC`
+   - `LOOKUP_BIGQUERY_TABLE`
+
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Deploy Cloud Functions and Dataflow templates via Terraform or gcloud.
-4. Trigger the orchestrator manually or schedule via Cloud Scheduler.
 
-## Example Usage
+3. Deploy the Cloud Functions and trigger Dataflow jobs via `gcloud` or your IaC of choice.
+
+## 🧪 Running Tests
+
 ```bash
-# Invoke ingestion Cloud Function
+pytest tests/ -v
+```
+
+Covers ingestion retry behavior (mocked FTP/HTTP/GCS), the validation classifier and transformation enrichment logic (run directly as plain Python, no live Beam runner needed), and Pub/Sub message handling. CI runs this on every push.
+
+## 🧭 Example Usage
+
+```bash
+# Invoke the ingestion Cloud Function
 gcloud functions call ingestHandler --data '{}'
-# Run Dataflow template
+
+# Run a Dataflow validation/transformation job
 gcloud dataflow jobs run validate-job --gcs-location gs://my-templates/validate_template
+
 # Query curated data in BigQuery
 bq query --use_legacy_sql=false 'SELECT * FROM dataset.curated_table LIMIT 10;'
 ```
 
-## Requirements
+## 🔧 Requirements
+
 - Python 3.8+
-- GCP IAM service account with roles: Storage Admin, Dataflow Admin, BigQuery Admin, Data Catalog Admin, Pub/Sub Editor, Monitoring Editor.
-- GCP SDKs: `google-cloud-storage`, `google-cloud-pubsub`, `google-cloud-bigquery`, `apache-beam[gcp]`, `zeep`, `grpcio`
+- GCP service account with roles: Storage Admin, Dataflow Admin, BigQuery Admin, Data Catalog Admin, Pub/Sub Editor, Monitoring Editor
+- Key SDKs: `google-cloud-storage`, `google-cloud-pubsub`, `google-cloud-bigquery`, `google-cloud-datacatalog`, `google-cloud-monitoring`, `apache-beam[gcp]`, `zeep`, `grpcio`
 
-## Final Output
-- Cleaned and enriched Parquet datasets in `gs://<bucket>/curated/...`
-- BigQuery tables created over curated datasets.
-- Notifications on data quality failures or schema drift via Pub/Sub.
+## 📊 Output
 
-## Notes
-- Customize Cloud Scheduler or Cloud Workflows for orchestration.
-- Extend monitoring for advanced drift detection.
-- Ensure Data Catalog IAM policies are configured for secure access.
+- Quarantined records in `gs://<bucket>/<quarantine_prefix>` plus a Pub/Sub failure notification
+- Enriched, queryable records in BigQuery
+- Cloud Monitoring alerts on uptime/schema-drift issues
