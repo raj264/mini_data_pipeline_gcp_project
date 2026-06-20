@@ -28,7 +28,8 @@ def orchestrator(event, context):
         temp_location=temp_location,
         project=project,
         registry_schema=os.environ['DATAFLOW_SCHEMA'],
-        output_topic=os.environ['PUBSUB_FAILURE_TOPIC']
+        output_topic=os.environ['PUBSUB_FAILURE_TOPIC'],
+        quarantine_path=f'gs://{raw_bucket}/{quarantine_prefix}'
     )
 
     # Transformation stage: launch Dataflow job

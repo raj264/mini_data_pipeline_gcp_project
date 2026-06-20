@@ -1,7 +1,9 @@
 google-cloud-storage
 google-cloud-pubsub
 google-cloud-bigquery
+google-cloud-datacatalog
+google-cloud-monitoring
 apache-beam[gcp]
 zeep
 grpcio
-pyspark
+pytest
